@@ -9,7 +9,7 @@ from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
 from typing import Generator
 import os
-from dotenv import load_load_dotenv
+from dotenv import load_dotenv
 
 load_dotenv()
 
