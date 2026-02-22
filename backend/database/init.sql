@@ -110,6 +110,21 @@ CREATE TABLE IF NOT EXISTS plate_records (
     notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS plate_corrections (
+    id SERIAL PRIMARY KEY,
+    plate_record_id INTEGER NOT NULL REFERENCES plate_records(id),
+    before_plate_number VARCHAR(50),
+    before_province_code VARCHAR(10),
+    after_plate_number VARCHAR(50),
+    after_province_code VARCHAR(10),
+    correction_type VARCHAR(50),
+    corrected_by_user_id INTEGER REFERENCES users(id),
+    correction_timestamp TIMESTAMPTZ DEFAULT NOW(),
+    correction_reason TEXT,
+    used_for_training BOOLEAN DEFAULT FALSE,
+    training_batch_id VARCHAR(100)
+);
+
 -- ==========================================
 -- MASTER DATA: Thai Provinces (77 provinces)
 -- ==========================================
@@ -240,6 +255,8 @@ CREATE INDEX idx_plate_records_ocr_trgm ON plate_records USING gin (ocr_plate_nu
 -- Composite indexes for common queries
 CREATE INDEX idx_plate_records_status_time ON plate_records (record_status, capture_timestamp DESC);
 CREATE INDEX idx_plate_records_camera_status ON plate_records (camera_id, record_status, capture_timestamp DESC);
+CREATE INDEX idx_correction_record ON plate_corrections (plate_record_id);
+CREATE INDEX idx_training_flag ON plate_corrections (used_for_training);
 
 -- ==========================================
 -- FUNCTIONS & TRIGGERS
