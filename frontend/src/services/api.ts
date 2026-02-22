@@ -5,7 +5,7 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosError } from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const NETWORK_COOLDOWN_MS = 10000;
 
 let networkCooldownUntil = 0;
