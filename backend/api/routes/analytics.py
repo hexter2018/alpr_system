@@ -7,11 +7,21 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from datetime import datetime, timedelta
 from typing import Optional
+import math
 
 from database.connection import get_db
 from database.models import PlateRecord, RecordStatusEnum, ProcessingModeEnum
 
 router = APIRouter()
+
+
+def _safe_float(value: Optional[float], default: float = 0.0) -> float:
+    """Convert DB numeric values to finite floats safe for JSON serialization."""
+    if value is None:
+        return default
+
+    numeric = float(value)
+    return numeric if math.isfinite(numeric) else default
 
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(
@@ -36,7 +46,10 @@ async def get_dashboard_summary(
     accuracy = (alpr / total * 100) if total > 0 else 0
     
     # Average confidence
-    avg_confidence = db.query(func.avg(PlateRecord.ocr_confidence)).scalar() or 0
+    avg_confidence = _safe_float(
+        db.query(func.avg(PlateRecord.ocr_confidence)).scalar(),
+        default=0.0
+    )
     
     return {
         "total_records": total,
@@ -45,7 +58,7 @@ async def get_dashboard_summary(
         "mlpr_count": mlpr,
         "pending_count": pending,
         "accuracy_rate": round(accuracy, 2),
-        "avg_confidence": round(float(avg_confidence), 2),
+        "avg_confidence": round(avg_confidence, 2),
         "registered_rate": round(
             (db.query(PlateRecord).filter(PlateRecord.is_registered == True).count() / total * 100) 
             if total > 0 else 0, 2

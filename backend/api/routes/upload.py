@@ -13,6 +13,7 @@ import uuid
 import shutil
 from pathlib import Path
 import logging
+import math
 
 from database.connection import get_db
 from database.models import PlateRecord, ProcessingModeEnum, RecordStatusEnum
@@ -21,6 +22,15 @@ from services.validation_service import ValidationService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _safe_float(value: Optional[float], default: float = 0.0) -> float:
+    """Convert values to finite float to avoid JSON serialization errors."""
+    if value is None:
+        return default
+
+    numeric = float(value)
+    return numeric if math.isfinite(numeric) else default
 
 # Initialize services
 alpr_pipeline = ALPRPipeline()
@@ -154,7 +164,7 @@ async def process_single_image(
             plate_number=plate_record.final_plate_number,
             province_code=plate_record.final_province_code,
             province_name=validation_result.get("province_name"),
-            confidence=plate_record.ocr_confidence,
+            confidence=_safe_float(plate_record.ocr_confidence),
             is_registered=plate_record.is_registered,
             status=plate_record.record_status.value,
             cropped_image_url=f"/storage/cropped_plates/{cropped_path.name}",
@@ -165,6 +175,9 @@ async def process_single_image(
         logger.info(f"✅ Successfully processed: {plate_record.final_plate_number}")
         return result
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error(f"❌ Error processing image: {e}", exc_info=True)
         db.rollback()
