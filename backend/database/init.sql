@@ -26,7 +26,7 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS provinces (
     id SERIAL PRIMARY KEY,
-    code int (10) UNIQUE NOT NULL,
+    code int(10) UNIQUE NOT NULL,
     name_th VARCHAR(100) NOT NULL,
     name_en VARCHAR(100) NOT NULL,
     region VARCHAR(50),
