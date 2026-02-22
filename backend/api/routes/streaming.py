@@ -3,7 +3,7 @@ Streaming API Routes - Camera Stream Management
 Start/stop RTSP streams, configure triggers, monitor status
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
@@ -12,10 +12,15 @@ import logging
 from database.connection import get_db
 from database.models import Camera
 from services.streaming_manager import StreamingManager
-from main import streaming_manager  # Global instance
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def get_streaming_manager(request: Request) -> Optional[StreamingManager]:
+    """Fetch streaming manager from app state."""
+    return getattr(request.app.state, "streaming_manager", None)
+
 
 # ==================== PYDANTIC MODELS ====================
 
@@ -52,7 +57,7 @@ class CameraResponse(BaseModel):
     is_active: bool
     status: str
     last_heartbeat: Optional[str]
-    
+
     class Config:
         from_attributes = True
 
@@ -75,12 +80,12 @@ async def list_cameras(
 ):
     """Get list of all cameras"""
     query = db.query(Camera)
-    
+
     if is_active is not None:
         query = query.filter(Camera.is_active == is_active)
-    
+
     cameras = query.all()
-    
+
     return [
         CameraResponse(
             id=cam.id,
@@ -114,13 +119,13 @@ async def create_camera(
         is_active=True,
         status="offline"
     )
-    
+
     db.add(new_camera)
     db.commit()
     db.refresh(new_camera)
-    
+
     logger.info(f"✅ Camera created: {new_camera.name} (ID: {new_camera.id})")
-    
+
     return CameraResponse(
         id=new_camera.id,
         name=new_camera.name,
@@ -143,10 +148,10 @@ async def update_camera(
 ):
     """Update camera configuration"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
-    
+
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-    
+
     # Update fields if provided
     if camera_update.name is not None:
         camera.name = camera_update.name
@@ -162,12 +167,12 @@ async def update_camera(
         camera.skip_frames = camera_update.skip_frames
     if camera_update.is_active is not None:
         camera.is_active = camera_update.is_active
-    
+
     db.commit()
     db.refresh(camera)
-    
+
     logger.info(f"✅ Camera updated: {camera.name} (ID: {camera_id})")
-    
+
     return CameraResponse(
         id=camera.id,
         name=camera.name,
@@ -185,45 +190,50 @@ async def update_camera(
 @router.delete("/cameras/{camera_id}")
 async def delete_camera(
     camera_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Delete a camera (soft delete - set inactive)"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
-    
+
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-    
+
+    streaming_manager = get_streaming_manager(request)
+
     # Stop stream if running
     if streaming_manager and camera_id in streaming_manager.stream_processors:
         await streaming_manager.stop_stream(camera_id)
-    
+
     # Soft delete
     camera.is_active = False
     camera.status = "deleted"
     db.commit()
-    
+
     logger.info(f"🗑️  Camera deleted: {camera.name} (ID: {camera_id})")
-    
+
     return {"success": True, "message": "Camera deleted successfully"}
 
 
 @router.post("/cameras/{camera_id}/start")
 async def start_camera_stream(
     camera_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Start processing a camera stream"""
+    streaming_manager = get_streaming_manager(request)
     if not streaming_manager:
         raise HTTPException(status_code=500, detail="Streaming manager not initialized")
-    
+
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
-    
+
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-    
+
     if not camera.is_active:
         raise HTTPException(status_code=400, detail="Camera is not active")
-    
+
     # Check if already running
     if camera_id in streaming_manager.stream_processors:
         return {
@@ -231,10 +241,10 @@ async def start_camera_stream(
             "message": "Stream is already running",
             "camera_id": camera_id
         }
-    
+
     # Start stream
     success = await streaming_manager.start_stream(camera_id)
-    
+
     if success:
         logger.info(f"🎥 Stream started: {camera.name} (ID: {camera_id})")
         return {
@@ -248,23 +258,25 @@ async def start_camera_stream(
 
 @router.post("/cameras/{camera_id}/stop")
 async def stop_camera_stream(
-    camera_id: int
+    camera_id: int,
+    request: Request
 ):
     """Stop processing a camera stream"""
+    streaming_manager = get_streaming_manager(request)
     if not streaming_manager:
         raise HTTPException(status_code=500, detail="Streaming manager not initialized")
-    
+
     if camera_id not in streaming_manager.stream_processors:
         return {
             "success": False,
             "message": "Stream is not running",
             "camera_id": camera_id
         }
-    
+
     await streaming_manager.stop_stream(camera_id)
-    
+
     logger.info(f"🛑 Stream stopped: Camera ID {camera_id}")
-    
+
     return {
         "success": True,
         "message": "Stream stopped successfully",
@@ -274,19 +286,21 @@ async def stop_camera_stream(
 
 @router.get("/streams/active", response_model=List[StreamStatus])
 async def get_active_streams(
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Get list of currently active streams"""
+    streaming_manager = get_streaming_manager(request)
     if not streaming_manager:
         return []
-    
+
     active_camera_ids = streaming_manager.get_active_streams()
-    
+
     streams = []
     for camera_id in active_camera_ids:
         camera = db.query(Camera).filter(Camera.id == camera_id).first()
         status = streaming_manager.get_stream_status(camera_id)
-        
+
         if camera and status:
             streams.append(StreamStatus(
                 camera_id=camera_id,
@@ -295,28 +309,31 @@ async def get_active_streams(
                 frame_count=status.get("frame_count"),
                 triggered_tracks=status.get("triggered_tracks")
             ))
-    
+
     return streams
 
 
 @router.get("/cameras/{camera_id}/status")
 async def get_camera_stream_status(
     camera_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """Get detailed status of a specific camera stream"""
     camera = db.query(Camera).filter(Camera.id == camera_id).first()
-    
+
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-    
+
+    streaming_manager = get_streaming_manager(request)
+
     # Check if stream is active
     is_streaming = streaming_manager and camera_id in streaming_manager.stream_processors
-    
+
     stream_info = None
     if is_streaming:
         stream_info = streaming_manager.get_stream_status(camera_id)
-    
+
     return {
         "camera_id": camera_id,
         "camera_name": camera.name,
