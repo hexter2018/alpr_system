@@ -3,7 +3,7 @@ Database Configuration & Session Management
 Handles PostgreSQL connections with connection pooling
 """
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
@@ -91,7 +91,22 @@ def init_database():
     """Initialize database tables"""
     from .models import Base
     Base.metadata.create_all(bind=engine)
+    _apply_schema_patches()
     print("✅ Database tables created successfully")
+
+
+def _apply_schema_patches():
+    """Apply lightweight schema patches for existing deployments."""
+    patch_statements = [
+        """
+        ALTER TABLE plate_records
+        ADD COLUMN IF NOT EXISTS plate_type plate_type_enum DEFAULT 'UNKNOWN'
+        """
+    ]
+
+    with engine.begin() as conn:
+        for statement in patch_statements:
+            conn.execute(text(statement))
 
 
 def drop_all_tables():
