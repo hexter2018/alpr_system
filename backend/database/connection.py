@@ -101,6 +101,30 @@ def _apply_schema_patches():
         """
         ALTER TABLE plate_records
         ADD COLUMN IF NOT EXISTS plate_type plate_type_enum DEFAULT 'UNKNOWN'
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS plate_corrections (
+            id SERIAL PRIMARY KEY,
+            plate_record_id INTEGER NOT NULL REFERENCES plate_records(id),
+            before_plate_number VARCHAR(50),
+            before_province_code VARCHAR(10),
+            after_plate_number VARCHAR(50),
+            after_province_code VARCHAR(10),
+            correction_type VARCHAR(50),
+            corrected_by_user_id INTEGER REFERENCES users(id),
+            correction_timestamp TIMESTAMPTZ DEFAULT NOW(),
+            correction_reason TEXT,
+            used_for_training BOOLEAN DEFAULT FALSE,
+            training_batch_id VARCHAR(100)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_correction_record
+        ON plate_corrections (plate_record_id)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_training_flag
+        ON plate_corrections (used_for_training)
         """
     ]
 
