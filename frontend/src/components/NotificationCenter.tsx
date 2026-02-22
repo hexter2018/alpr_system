@@ -30,13 +30,16 @@ const NotificationCenter: React.FC = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [ws, setWs] = useState<WebSocket | null>(null);
 
+  const wsBaseUrl = import.meta.env.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+
   // Connect to WebSocket
   useEffect(() => {
     const userId = localStorage.getItem('user_id') || '1'; // TODO: Get from auth
     const token = localStorage.getItem('access_token');
+    const encodedToken = token ? encodeURIComponent(token) : '';
     
     const websocket = new WebSocket(
-      `ws://localhost:8000/api/ws/notifications?user_id=${userId}&token=${token}`
+      `${wsBaseUrl}/api/ws/notifications?user_id=${userId}&token=${encodedToken}`
     );
 
     websocket.onopen = () => {
@@ -67,7 +70,7 @@ const NotificationCenter: React.FC = () => {
     return () => {
       websocket.close();
     };
-  }, []);
+  }, [wsBaseUrl]);
 
   const handleNotification = useCallback((notif: Notification) => {
     // Add to notifications list
