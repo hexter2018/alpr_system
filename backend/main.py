@@ -40,8 +40,6 @@ logger = logging.getLogger(__name__)
 
 # ==================== LIFESPAN EVENTS ====================
 
-streaming_manager = None
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
@@ -70,14 +68,14 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Storage directories created")
     
     # Initialize streaming manager
-    global streaming_manager
-    streaming_manager = StreamingManager()
+    app.state.streaming_manager = StreamingManager()
     logger.info("✅ Streaming manager initialized")
     
     yield
     
     # Shutdown
     logger.info("🛑 Shutting down Thai ALPR System...")
+    streaming_manager = getattr(app.state, "streaming_manager", None)
     if streaming_manager:
         await streaming_manager.stop_all_streams()
     logger.info("✅ Graceful shutdown complete")
