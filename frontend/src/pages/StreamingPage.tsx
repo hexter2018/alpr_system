@@ -35,6 +35,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { AxiosError } from 'axios';
 import { api } from '../services/api';
 
 const { Option } = Select;
@@ -90,7 +91,10 @@ const StreamingPage: React.FC = () => {
       const response = await api.streaming.listCameras();
       setCameras(response.data);
     } catch (error) {
-      console.error('Failed to fetch cameras:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to fetch cameras:', error);
+      }
     }
   };
 
@@ -99,7 +103,10 @@ const StreamingPage: React.FC = () => {
       const response = await api.streaming.getActiveStreams();
       setActiveStreams(response.data);
     } catch (error) {
-      console.error('Failed to fetch active streams:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to fetch active streams:', error);
+      }
     }
   };
 

@@ -6,6 +6,13 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosError } from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const NETWORK_COOLDOWN_MS = 10000;
+
+let networkCooldownUntil = 0;
+
+const isNetworkError = (error: AxiosError): boolean => {
+  return !error.response && (error.code === 'ERR_NETWORK' || error.message === 'Network Error');
+};
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -18,6 +25,17 @@ export const apiClient: AxiosInstance = axios.create({
 // Request interceptor - Add auth token
 apiClient.interceptors.request.use(
   (config) => {
+    if (Date.now() < networkCooldownUntil) {
+      const waitSeconds = Math.ceil((networkCooldownUntil - Date.now()) / 1000);
+      return Promise.reject(
+        new axios.AxiosError(
+          `Backend temporarily unavailable. Retrying in ${waitSeconds}s.`,
+          'ERR_NETWORK_COOLDOWN',
+          config
+        )
+      );
+    }
+
     const token = localStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -33,6 +51,10 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
+    if (isNetworkError(error)) {
+      networkCooldownUntil = Date.now() + NETWORK_COOLDOWN_MS;
+    }
+
     if (error.response?.status === 401) {
       // Unauthorized - redirect to login
       localStorage.removeItem('access_token');

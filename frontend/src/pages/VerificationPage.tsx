@@ -32,6 +32,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import type { AxiosError } from 'axios';
 import { apiClient } from '../services/api';
 
 const { RangePicker } = DatePicker;
@@ -121,8 +122,11 @@ const VerificationPage: React.FC = () => {
       setRecords(response.data.records);
       setTotalRecords(response.data.total);
     } catch (error) {
-      message.error('Failed to load records');
-      console.error(error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        message.error('Failed to load records');
+        console.error(error);
+      }
     } finally {
       setLoading(false);
     }
@@ -133,7 +137,10 @@ const VerificationPage: React.FC = () => {
       const response = await apiClient.get('/verification/stats/summary');
       setStats(response.data);
     } catch (error) {
-      console.error('Failed to load stats:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to load stats:', error);
+      }
     }
   };
 
