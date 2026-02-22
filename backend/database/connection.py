@@ -4,6 +4,7 @@ Handles PostgreSQL connections with connection pooling
 """
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
@@ -99,6 +100,28 @@ def _apply_schema_patches():
     """Apply lightweight schema patches for existing deployments."""
     patch_statements = [
         """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_type
+                WHERE typname = 'plate_type_enum'
+            ) THEN
+                CREATE TYPE plate_type_enum AS ENUM (
+                    'PRIVATE',
+                    'COMMERCIAL',
+                    'TAXI',
+                    'MOTORCYCLE',
+                    'GOVERNMENT',
+                    'TEMPORARY',
+                    'DIPLOMATIC',
+                    'UNKNOWN'
+                );
+            END IF;
+        END
+        $$
+        """,
+        """
         ALTER TABLE cameras
         ADD COLUMN IF NOT EXISTS trigger_config JSON
         """,
@@ -172,9 +195,14 @@ def _apply_schema_patches():
         """
     ]
 
-    with engine.begin() as conn:
+    with engine.connect() as conn:
         for statement in patch_statements:
-            conn.execute(text(statement))
+            try:
+                conn.execute(text(statement))
+                conn.commit()
+            except SQLAlchemyError as exc:
+                conn.rollback()
+                print(f"⚠️  Schema patch skipped: {exc}")
 
 
 def drop_all_tables():
