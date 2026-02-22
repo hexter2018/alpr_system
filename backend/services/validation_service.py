@@ -313,49 +313,58 @@ class ValidationService:
         db: Session
     ) -> Optional[Dict]:
         """
-        Find closest matching province using 2-letter code
-        
-        This is the FALLBACK matching strategy when full name is not available.
-        
-        Args:
-            province_code: 2-letter province code (e.g., "กท", "นว")
-            db: Database session
-        
-        Returns:
-            Best matching province with score, or None
-        
-        Examples:
-            Input: "กท" → Match: กรุงเทพมหานคร (100%)
-            Input: "นว" → Match: เชียงใหม่ (100%)
-            Input: "กค" → Match: กรุงเทพมหานคร (50%) [OCR error: ท→ค]
+        Find closest matching province using province code-like input
+
+        This is the FALLBACK strategy when full province text is not available.
+        Supports multiple input forms from OCR/UI:
+        - Province table code (e.g., "10", "50")
+        - Zero-padded numeric values (e.g., "01")
+        - Province id accidentally sent as code (e.g., id=1)
+        - Legacy Thai short text (e.g., "กท")
         """
         if not province_code or len(province_code) < 1:
             return None
-        
-        # Clean code
-        province_code = province_code.strip()[:2]  # Take first 2 characters
-        
+
+        normalized_code = province_code.strip()
+
         # Get all active provinces
         provinces = db.query(Province).filter(Province.is_active == True).all()
-        
-        matches = []
+        if not provinces:
+            return None
+
+        # 1) Exact code match first
         for province in provinces:
-            # Calculate similarity with province code
-            score = fuzz.ratio(province_code, province.code)
-            
+            if normalized_code == province.code:
+                return {"province": province, "score": 100}
+
+        # 2) Numeric normalization / province-id fallback
+        if normalized_code.isdigit():
+            numeric_value = int(normalized_code)
+
+            for province in provinces:
+                if province.code and province.code.isdigit() and int(province.code) == numeric_value:
+                    return {"province": province, "score": 100}
+
+            for province in provinces:
+                if province.id == numeric_value:
+                    logger.info(
+                        f"ℹ️ Interpreting province code '{normalized_code}' as province id={numeric_value}"
+                    )
+                    return {"province": province, "score": 95}
+
+        # 3) Fuzzy fallback (legacy short codes / OCR mistakes)
+        fuzzy_input = normalized_code[:2]
+        matches = []
+
+        for province in provinces:
+            score = fuzz.ratio(fuzzy_input, province.code)
             if score >= self.PROVINCE_CODE_THRESHOLD:
-                matches.append({
-                    "province": province,
-                    "score": score
-                })
-        
+                matches.append({"province": province, "score": score})
+
         if not matches:
             return None
-        
-        # Sort by score
+
         matches.sort(key=lambda x: x["score"], reverse=True)
-        
-        # Return best match
         return matches[0]
     
     def _extract_province_from_text(
