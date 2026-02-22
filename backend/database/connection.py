@@ -218,7 +218,7 @@ def check_database_connection() -> bool:
     """Check if database is accessible"""
     try:
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         print(f"❌ Database connection failed: {e}")
