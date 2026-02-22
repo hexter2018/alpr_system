@@ -98,7 +98,7 @@ class RegisteredVehicle(Base):
     registration_date = Column(DateTime(timezone=True))
     expiry_date = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
-    metadata = Column(JSON)  # Additional flexible data
+    extra_data = Column("metadata", JSON)  # Additional flexible data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -167,7 +167,7 @@ class PlateRecord(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Audit & metadata
-    metadata = Column(JSON)  # Flexible field for additional data
+    extra_data = Column("metadata", JSON)  # Flexible field for additional data
     notes = Column(Text)  # Human notes
     
     # Relationships
@@ -246,7 +246,7 @@ class Camera(Base):
     status = Column(String(50), default="offline")  # online, offline, error
     
     # Metadata
-    metadata = Column(JSON)
+    extra_data = Column("metadata", JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -304,7 +304,7 @@ class ProcessingLog(Base):
     stack_trace = Column(Text)
     
     # Metadata
-    metadata = Column(JSON)
+    extra_data = Column("metadata", JSON)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
