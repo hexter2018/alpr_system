@@ -9,6 +9,7 @@ from sqlalchemy import desc, and_, or_
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from pathlib import Path
 import logging
 
 from database.connection import get_db
@@ -196,7 +197,6 @@ async def get_verification_list(
     records = query.order_by(desc(PlateRecord.capture_timestamp)).offset(offset).limit(page_size).all()
     
     # Build response
-    from pathlib import Path
     record_responses = [build_record_response(record, db) for record in records]
     
     total_pages = (total + page_size - 1) // page_size
@@ -221,7 +221,6 @@ async def get_record_detail(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
     
-    from pathlib import Path
     return build_record_response(record, db)
 
 
