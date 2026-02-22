@@ -19,6 +19,86 @@ CREATE TYPE plate_type_enum AS ENUM (
 );
 
 -- ==========================================
+-- TABLES
+-- ==========================================
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS provinces (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(10) UNIQUE NOT NULL,
+    name_th VARCHAR(100) NOT NULL,
+    name_en VARCHAR(100) NOT NULL,
+    region VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS plate_prefixes (
+    id SERIAL PRIMARY KEY,
+    prefix VARCHAR(10) UNIQUE NOT NULL,
+    plate_type plate_type_enum NOT NULL,
+    description VARCHAR(200),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(200) UNIQUE NOT NULL,
+    hashed_password VARCHAR(500) NOT NULL,
+    full_name VARCHAR(200),
+    role VARCHAR(50) DEFAULT 'viewer',
+    is_active BOOLEAN DEFAULT TRUE,
+    is_superuser BOOLEAN DEFAULT FALSE,
+    last_login TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS registered_vehicles (
+    id SERIAL PRIMARY KEY,
+    plate_number VARCHAR(50) UNIQUE NOT NULL,
+    province_id INTEGER NOT NULL REFERENCES provinces(id),
+    plate_type plate_type_enum NOT NULL,
+    owner_name VARCHAR(200),
+    vehicle_model VARCHAR(100),
+    vehicle_color VARCHAR(50),
+    registration_date TIMESTAMPTZ,
+    expiry_date TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS plate_records (
+    id SERIAL PRIMARY KEY,
+    image_path VARCHAR(500),
+    camera_id INTEGER,
+    processing_mode processing_mode_enum NOT NULL,
+    record_status record_status_enum NOT NULL DEFAULT 'PENDING',
+    ocr_plate_number VARCHAR(50) NOT NULL,
+    ocr_province_code VARCHAR(10),
+    ocr_full_text VARCHAR(100),
+    ocr_confidence FLOAT,
+    corrected_plate_number VARCHAR(50),
+    corrected_province_code VARCHAR(10),
+    correction_timestamp TIMESTAMPTZ,
+    corrected_by_user_id INTEGER REFERENCES users(id),
+    final_plate_number VARCHAR(50) NOT NULL,
+    final_province_code VARCHAR(10),
+    province_id INTEGER REFERENCES provinces(id),
+    is_registered BOOLEAN DEFAULT FALSE,
+    registered_vehicle_id INTEGER REFERENCES registered_vehicles(id),
+    capture_timestamp TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+-- ==========================================
 -- MASTER DATA: Thai Provinces (77 provinces)
 -- ==========================================
 
