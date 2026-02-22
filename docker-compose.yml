@@ -72,6 +72,10 @@ services:
   nginx:
     image: nginx:alpine
     container_name: thai_alpr_nginx
+    # Start only when explicitly requested: docker compose --profile proxy up -d
+    profiles: ["proxy"]
+    # nginx reads /etc/nginx/nginx.conf on startup; this command makes it explicit.
+    command: ["nginx", "-g", "daemon off;", "-c", "/etc/nginx/nginx.conf"]
     ports:
       - "80:80"
       - "443:443"
