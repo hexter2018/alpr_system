@@ -91,11 +91,23 @@ CREATE TABLE IF NOT EXISTS plate_records (
     final_plate_number VARCHAR(50) NOT NULL,
     final_province_code VARCHAR(10),
     province_id INTEGER REFERENCES provinces(id),
+    plate_type plate_type_enum DEFAULT 'UNKNOWN',
     is_registered BOOLEAN DEFAULT FALSE,
     registered_vehicle_id INTEGER REFERENCES registered_vehicles(id),
+    validation_score FLOAT,
+    original_image_path VARCHAR(500),
+    cropped_plate_path VARCHAR(500) NOT NULL,
+    detection_bbox JSONB,
+    detection_confidence FLOAT,
+    frame_number INTEGER,
+    trigger_line_position JSONB,
+    tracking_id VARCHAR(50),
     capture_timestamp TIMESTAMPTZ DEFAULT NOW(),
+    processing_timestamp TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ
+    updated_at TIMESTAMPTZ,
+    metadata JSONB,
+    notes TEXT
 );
 
 -- ==========================================
