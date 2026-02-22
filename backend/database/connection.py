@@ -99,6 +99,50 @@ def _apply_schema_patches():
     """Apply lightweight schema patches for existing deployments."""
     patch_statements = [
         """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS trigger_config JSON
+        """,
+        """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS fps_processing INTEGER DEFAULT 5
+        """,
+        """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS skip_frames INTEGER DEFAULT 3
+        """,
+        """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS last_heartbeat TIMESTAMPTZ
+        """,
+        """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'offline'
+        """,
+        """
+        ALTER TABLE cameras
+        ADD COLUMN IF NOT EXISTS metadata JSON
+        """,
+        """
+        UPDATE cameras
+        SET trigger_config = '{}'::json
+        WHERE trigger_config IS NULL
+        """,
+        """
+        UPDATE cameras
+        SET fps_processing = 5
+        WHERE fps_processing IS NULL
+        """,
+        """
+        UPDATE cameras
+        SET skip_frames = 3
+        WHERE skip_frames IS NULL
+        """,
+        """
+        UPDATE cameras
+        SET status = 'offline'
+        WHERE status IS NULL
+        """,
+        """
         ALTER TABLE plate_records
         ADD COLUMN IF NOT EXISTS plate_type plate_type_enum DEFAULT 'UNKNOWN'
         """,
