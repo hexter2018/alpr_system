@@ -1,85 +1,153 @@
 """
-Validation Service - Master Data Validation
-Checks OCR results against registered vehicles and provinces
-Implements fuzzy matching for improved accuracy
+Validation Service - Master Data Validation with Enhanced Thai Province Matching
+Validates OCR results against registered vehicles and provinces
+Implements robust fuzzy matching for Thai province names with OCR error tolerance
 """
 
 from sqlalchemy.orm import Session
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 import logging
-from fuzzywuzzy import fuzz
+import re
+
+# Use rapidfuzz for better performance (fallback to fuzzywuzzy if not available)
+try:
+    from rapidfuzz import fuzz, process
+    USING_RAPIDFUZZ = True
+    logger_lib = "rapidfuzz"
+except ImportError:
+    from fuzzywuzzy import fuzz, process
+    USING_RAPIDFUZZ = False
+    logger_lib = "fuzzywuzzy"
+
 from database.models import Province, RegisteredVehicle, PlatePrefix
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.info(f"✅ Using {logger_lib} for fuzzy matching")
+
 
 class ValidationService:
-    """Validates OCR results against master data"""
+    """
+    Validates OCR results against master data
     
-    def __init__(self, fuzzy_threshold: int = 85):
-        """
-        Initialize validation service
-        
-        Args:
-            fuzzy_threshold: Minimum similarity score for fuzzy matching (0-100)
-        """
-        self.fuzzy_threshold = fuzzy_threshold
+    Enhanced Features:
+    - Full Thai province name matching (กรุงเทพมหานคร, not just กท)
+    - Robust fuzzy matching with OCR error tolerance
+    - Multi-strategy matching (code, name_th, name_en)
+    - Optimized for Thai character recognition errors
+    """
+    
+    # Fuzzy matching thresholds
+    PROVINCE_CODE_THRESHOLD = 85      # For 2-letter codes (strict)
+    PROVINCE_NAME_THRESHOLD = 80      # For full province names (tolerant of OCR errors)
+    PROVINCE_ENGLISH_THRESHOLD = 85   # For English names
+    VEHICLE_PLATE_THRESHOLD = 85      # For vehicle plate matching
+    
+    def __init__(self):
+        """Initialize validation service"""
+        logger.info("ValidationService initialized with enhanced Thai province matching")
     
     def validate_plate(
         self,
         plate_number: str,
-        province_code: Optional[str],
-        db: Session
+        province_code: Optional[str] = None,
+        province_text: Optional[str] = None,
+        db: Session = None
     ) -> Dict:
         """
-        Validate license plate against master data
-        
-        Steps:
-        1. Validate province code exists
-        2. Check if plate is in registered_vehicles (exact match)
-        3. If not found, try fuzzy matching
-        4. Validate plate prefix format
+        Validate license plate against master data with enhanced province matching
         
         Args:
             plate_number: License plate number (e.g., "กก1234")
-            province_code: Province code (e.g., "กท")
+            province_code: 2-letter province code (e.g., "กท") - OPTIONAL
+            province_text: Full OCR text that may contain province name (e.g., "กรุงเทพมหานคร")
             db: Database session
         
         Returns:
-            Dict containing validation results
+            Dict containing validation results with matched province information
+        
+        Examples:
+            # Case 1: Only province code provided
+            validate_plate("กก1234", province_code="กท", db=db)
+            
+            # Case 2: Full OCR text with province name
+            validate_plate("กก1234", province_text="กรุงเทพมหานคร", db=db)
+            
+            # Case 3: Misspelled province name (OCR error)
+            validate_plate("กก1234", province_text="กรุงเทพมหานคธ", db=db)  # ร→ธ error
+            
+            # Case 4: Both provided (prioritizes full text)
+            validate_plate("กก1234", province_code="กท", province_text="กรุงเทพมหานคร", db=db)
         """
         result = {
             "is_valid_format": False,
             "is_registered": False,
             "province_id": None,
             "province_name": None,
+            "province_code": None,
             "registered_vehicle_id": None,
             "validation_score": 0.0,
-            "fuzzy_matches": []
+            "fuzzy_matches": [],
+            "match_method": None  # Track how province was matched
         }
         
-        # Step 1: Validate province code
-        if province_code:
-            province = db.query(Province).filter(
-                Province.code == province_code,
-                Province.is_active == True
-            ).first()
-            
-            if province:
-                result["province_id"] = province.id
-                result["province_name"] = province.name_th
-                logger.info(f"✅ Valid province: {province.name_th} ({province_code})")
-            else:
-                # Try fuzzy matching on province codes
-                fuzzy_province = self._fuzzy_match_province(province_code, db)
-                if fuzzy_province:
-                    result["province_id"] = fuzzy_province.id
-                    result["province_name"] = fuzzy_province.name_th
-                    result["validation_score"] = 0.8  # Fuzzy match
-                    logger.info(f"⚠️  Fuzzy matched province: {fuzzy_province.name_th}")
-                else:
-                    logger.warning(f"❌ Invalid province code: {province_code}")
+        # ==================== PROVINCE VALIDATION ====================
+        # Priority: province_text > province_code
+        # Reason: Full text provides more information and context
         
-        # Step 2: Check if plate exists in registered vehicles (exact match)
+        province_match = None
+        
+        if province_text:
+            # Strategy 1: Match against full province name (PRIMARY)
+            province_match = self._fuzzy_match_province_by_name(province_text, db)
+            
+            if province_match:
+                result["match_method"] = "province_name_fuzzy"
+                result["validation_score"] = province_match["score"] / 100.0
+                logger.info(
+                    f"✅ Matched province by name: '{province_text}' → {province_match['province'].name_th} "
+                    f"(score: {province_match['score']:.1f}%)"
+                )
+        
+        # Fallback to province code if name matching failed or not provided
+        if not province_match and province_code:
+            province_match = self._fuzzy_match_province_by_code(province_code, db)
+            
+            if province_match:
+                result["match_method"] = "province_code_fuzzy"
+                result["validation_score"] = province_match["score"] / 100.0
+                logger.info(
+                    f"✅ Matched province by code: '{province_code}' → {province_match['province'].code} "
+                    f"(score: {province_match['score']:.1f}%)"
+                )
+        
+        # Extract province from full text if no explicit match yet
+        if not province_match and province_text:
+            # Try to extract province name from text
+            extracted_province = self._extract_province_from_text(province_text, db)
+            
+            if extracted_province:
+                province_match = {
+                    "province": extracted_province,
+                    "score": 100.0  # Exact extraction
+                }
+                result["match_method"] = "province_name_extracted"
+                result["validation_score"] = 1.0
+                logger.info(f"✅ Extracted province from text: {extracted_province.name_th}")
+        
+        # Populate province information if matched
+        if province_match:
+            province = province_match["province"]
+            result["province_id"] = province.id
+            result["province_name"] = province.name_th
+            result["province_code"] = province.code
+            logger.info(f"📍 Province: {province.name_th} ({province.code})")
+        else:
+            logger.warning(f"⚠️  Could not match province: code='{province_code}', text='{province_text}'")
+        
+        # ==================== VEHICLE REGISTRATION CHECK ====================
+        # Check if plate exists in registered vehicles (exact match)
+        
         registered = db.query(RegisteredVehicle).filter(
             RegisteredVehicle.plate_number == plate_number,
             RegisteredVehicle.is_active == True
@@ -88,7 +156,6 @@ class ValidationService:
         if registered:
             result["is_registered"] = True
             result["registered_vehicle_id"] = registered.id
-            result["validation_score"] = 1.0  # Perfect match
             
             # Update province info from registered vehicle if not already set
             if not result["province_id"] and registered.province_id:
@@ -96,23 +163,38 @@ class ValidationService:
                 if province:
                     result["province_id"] = province.id
                     result["province_name"] = province.name_th
+                    result["province_code"] = province.code
+                    result["match_method"] = "registered_vehicle"
+            
+            # If exact match, set perfect score
+            if result["validation_score"] < 1.0:
+                result["validation_score"] = 1.0
             
             logger.info(f"✅ Plate registered: {plate_number}")
         else:
-            # Step 3: Try fuzzy matching
+            # Try fuzzy matching on vehicle plates
             fuzzy_matches = self._fuzzy_match_plate(plate_number, db)
+            
             if fuzzy_matches:
                 result["fuzzy_matches"] = fuzzy_matches
                 
                 # If top match is above threshold, use it
-                if fuzzy_matches[0]["score"] >= self.fuzzy_threshold:
+                if fuzzy_matches[0]["score"] >= self.VEHICLE_PLATE_THRESHOLD:
                     best_match = fuzzy_matches[0]
                     result["is_registered"] = True
                     result["registered_vehicle_id"] = best_match["vehicle_id"]
-                    result["validation_score"] = best_match["score"] / 100.0
-                    logger.info(f"⚠️  Fuzzy matched plate: {plate_number} → {best_match['plate_number']}")
+                    
+                    # Use fuzzy score if it's better than province score
+                    fuzzy_score = best_match["score"] / 100.0
+                    if fuzzy_score > result["validation_score"]:
+                        result["validation_score"] = fuzzy_score
+                    
+                    logger.info(
+                        f"⚠️  Fuzzy matched plate: {plate_number} → {best_match['plate_number']} "
+                        f"(score: {best_match['score']:.1f}%)"
+                    )
         
-        # Step 4: Validate prefix format
+        # ==================== PLATE FORMAT VALIDATION ====================
         if len(plate_number) >= 2:
             prefix = plate_number[:2]
             prefix_valid = db.query(PlatePrefix).filter(
@@ -126,47 +208,195 @@ class ValidationService:
         
         return result
     
-    def _fuzzy_match_province(
+    def _fuzzy_match_province_by_name(
         self,
-        province_code: str,
+        province_text: str,
         db: Session,
         top_n: int = 3
-    ) -> Optional[Province]:
+    ) -> Optional[Dict]:
         """
-        Find closest matching province using fuzzy string matching
+        Find closest matching province using full Thai name
+        
+        This is the PRIMARY matching strategy for provinces as OCR often
+        reads the full province name from the license plate.
         
         Args:
-            province_code: Province code to match
+            province_text: Full or partial province name from OCR (e.g., "กรุงเทพมหานคร")
             db: Database session
             top_n: Number of top matches to consider
         
         Returns:
-            Best matching Province or None
+            Best matching province with score, or None
+        
+        Examples:
+            Input: "กรุงเทพมหานคร" → Match: กรุงเทพมหานคร (100%)
+            Input: "กรุงเทพมหานคธ" → Match: กรุงเทพมหานคร (95%) [OCR error: ร→ธ]
+            Input: "เชียงใหม" → Match: เชียงใหม่ (90%) [Missing tone mark]
+            Input: "ขอนแก่น" → Match: ขอนแก่น (100%)
         """
+        if not province_text or len(province_text) < 2:
+            return None
+        
+        # Clean input text
+        province_text = province_text.strip()
+        
+        # Get all active provinces
+        provinces = db.query(Province).filter(Province.is_active == True).all()
+        
+        if not provinces:
+            return None
+        
+        # Build list of choices for fuzzy matching
+        # Include both Thai and English names for better matching
+        choices = []
+        for province in provinces:
+            choices.append({
+                "text": province.name_th,
+                "province": province,
+                "type": "name_th"
+            })
+            # Also match against English name (some OCR might output English)
+            if province.name_en:
+                choices.append({
+                    "text": province.name_en,
+                    "province": province,
+                    "type": "name_en"
+                })
+        
+        # Perform fuzzy matching
+        matches = []
+        
+        for choice in choices:
+            # Calculate similarity scores using multiple algorithms
+            # This provides better matching for Thai text with OCR errors
+            
+            ratio_score = fuzz.ratio(province_text, choice["text"])
+            partial_score = fuzz.partial_ratio(province_text, choice["text"])
+            token_sort_score = fuzz.token_sort_ratio(province_text, choice["text"])
+            
+            # Use the best score from all algorithms
+            best_score = max(ratio_score, partial_score, token_sort_score)
+            
+            # Apply threshold based on text type
+            threshold = (
+                self.PROVINCE_NAME_THRESHOLD if choice["type"] == "name_th"
+                else self.PROVINCE_ENGLISH_THRESHOLD
+            )
+            
+            if best_score >= threshold:
+                matches.append({
+                    "province": choice["province"],
+                    "score": best_score,
+                    "match_type": choice["type"],
+                    "matched_text": choice["text"]
+                })
+        
+        if not matches:
+            return None
+        
+        # Sort by score (highest first)
+        matches.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Return best match
+        best_match = matches[0]
+        
+        logger.debug(
+            f"Province name match: '{province_text}' → '{best_match['matched_text']}' "
+            f"({best_match['match_type']}, score: {best_match['score']:.1f}%)"
+        )
+        
+        return best_match
+    
+    def _fuzzy_match_province_by_code(
+        self,
+        province_code: str,
+        db: Session
+    ) -> Optional[Dict]:
+        """
+        Find closest matching province using 2-letter code
+        
+        This is the FALLBACK matching strategy when full name is not available.
+        
+        Args:
+            province_code: 2-letter province code (e.g., "กท", "นว")
+            db: Database session
+        
+        Returns:
+            Best matching province with score, or None
+        
+        Examples:
+            Input: "กท" → Match: กรุงเทพมหานคร (100%)
+            Input: "นว" → Match: เชียงใหม่ (100%)
+            Input: "กค" → Match: กรุงเทพมหานคร (50%) [OCR error: ท→ค]
+        """
+        if not province_code or len(province_code) < 1:
+            return None
+        
+        # Clean code
+        province_code = province_code.strip()[:2]  # Take first 2 characters
+        
         # Get all active provinces
         provinces = db.query(Province).filter(Province.is_active == True).all()
         
         matches = []
         for province in provinces:
-            # Calculate similarity scores
-            code_score = fuzz.ratio(province_code, province.code)
-            name_score = fuzz.partial_ratio(province_code, province.name_th)
+            # Calculate similarity with province code
+            score = fuzz.ratio(province_code, province.code)
             
-            # Use the best score
-            best_score = max(code_score, name_score)
-            
-            if best_score >= self.fuzzy_threshold:
+            if score >= self.PROVINCE_CODE_THRESHOLD:
                 matches.append({
                     "province": province,
-                    "score": best_score
+                    "score": score
                 })
+        
+        if not matches:
+            return None
         
         # Sort by score
         matches.sort(key=lambda x: x["score"], reverse=True)
         
-        # Return best match if any
-        if matches:
-            return matches[0]["province"]
+        # Return best match
+        return matches[0]
+    
+    def _extract_province_from_text(
+        self,
+        text: str,
+        db: Session
+    ) -> Optional[Province]:
+        """
+        Extract province name from OCR text using substring matching
+        
+        OCR often returns text like "กก1234กรุงเทพมหานคร" where the province
+        name is concatenated with the plate number.
+        
+        Args:
+            text: Full OCR text
+            db: Database session
+        
+        Returns:
+            Matched Province object or None
+        
+        Examples:
+            Input: "กก1234กรุงเทพมหานคร" → กรุงเทพมหานคร
+            Input: "นว5678เชียงใหม่" → เชียงใหม่
+        """
+        if not text or len(text) < 4:
+            return None
+        
+        # Get all active provinces
+        provinces = db.query(Province).filter(Province.is_active == True).all()
+        
+        # Try to find province name as substring in text
+        for province in provinces:
+            # Check Thai name
+            if province.name_th in text:
+                logger.debug(f"Extracted province: {province.name_th} from '{text}'")
+                return province
+            
+            # Check English name
+            if province.name_en and province.name_en.lower() in text.lower():
+                logger.debug(f"Extracted province: {province.name_en} from '{text}'")
+                return province
         
         return None
     
@@ -175,7 +405,7 @@ class ValidationService:
         plate_number: str,
         db: Session,
         top_n: int = 5
-    ) -> list:
+    ) -> List[Dict]:
         """
         Find similar license plates using fuzzy matching
         
@@ -191,18 +421,21 @@ class ValidationService:
         Returns:
             List of matching plates with scores
         """
-        # Get all registered plates
-        # In production, you might want to add LIMIT or use more efficient search
+        # Get registered plates (limit for performance)
         registered_plates = db.query(RegisteredVehicle).filter(
             RegisteredVehicle.is_active == True
-        ).limit(1000).all()  # Limit for performance
+        ).limit(1000).all()
+        
+        if not registered_plates:
+            return []
         
         matches = []
         for registered in registered_plates:
             # Calculate similarity
             score = fuzz.ratio(plate_number, registered.plate_number)
             
-            if score >= 70:  # Lower threshold for fuzzy search
+            # Lower threshold for plate matching (more tolerant)
+            if score >= 70:
                 matches.append({
                     "plate_number": registered.plate_number,
                     "vehicle_id": registered.id,
@@ -227,8 +460,6 @@ class ValidationService:
         Returns:
             Dict with validation result and detected type
         """
-        import re
-        
         result = {
             "is_valid": False,
             "plate_type": "UNKNOWN",
@@ -265,28 +496,48 @@ class ValidationService:
     def suggest_corrections(
         self,
         plate_number: str,
-        db: Session
-    ) -> list:
+        province_text: Optional[str] = None,
+        db: Session = None
+    ) -> List[Dict]:
         """
-        Suggest possible corrections for a plate number
+        Suggest possible corrections for plate and province
         
         Useful for the verification UI to show admins potential corrections
+        
+        Args:
+            plate_number: Plate number from OCR
+            province_text: Province text from OCR (optional)
+            db: Database session
         
         Returns:
             List of suggested corrections with confidence scores
         """
         suggestions = []
         
-        # Get fuzzy matches
+        # Get fuzzy matches for plate
         fuzzy_matches = self._fuzzy_match_plate(plate_number, db, top_n=5)
         
         for match in fuzzy_matches:
-            if match["score"] >= 75:  # Only suggest if reasonably similar
+            if match["score"] >= 75:
                 suggestions.append({
-                    "suggested_plate": match["plate_number"],
+                    "type": "plate_number",
+                    "suggested_value": match["plate_number"],
                     "confidence": match["score"] / 100.0,
                     "reason": "Similar registered vehicle found",
                     "vehicle_id": match["vehicle_id"]
+                })
+        
+        # Get province suggestions if text provided
+        if province_text:
+            province_match = self._fuzzy_match_province_by_name(province_text, db, top_n=3)
+            
+            if province_match:
+                suggestions.append({
+                    "type": "province",
+                    "suggested_value": province_match["province"].name_th,
+                    "province_code": province_match["province"].code,
+                    "confidence": province_match["score"] / 100.0,
+                    "reason": f"Matched province name (score: {province_match['score']:.1f}%)"
                 })
         
         # Check for common OCR errors
@@ -297,21 +548,23 @@ class ValidationService:
         seen = set()
         unique_suggestions = []
         for sugg in suggestions:
-            if sugg["suggested_plate"] not in seen:
-                seen.add(sugg["suggested_plate"])
+            key = f"{sugg['type']}:{sugg['suggested_value']}"
+            if key not in seen:
+                seen.add(key)
                 unique_suggestions.append(sugg)
         
         unique_suggestions.sort(key=lambda x: x["confidence"], reverse=True)
         
-        return unique_suggestions[:5]  # Return top 5
+        return unique_suggestions[:10]  # Return top 10
     
-    def _check_common_ocr_errors(self, plate_number: str) -> list:
+    def _check_common_ocr_errors(self, plate_number: str) -> List[Dict]:
         """
         Check for common OCR confusion patterns in Thai
         
         Common confusions:
         - ก (gor gai) vs ค (kor kwai)
         - จ (jor jan) vs ช (chor chang)
+        - ร (ror rua) vs ธ (thor thong)
         - 0 (zero) vs O (letter O)
         - 1 (one) vs I (letter I)
         """
@@ -325,6 +578,8 @@ class ValidationService:
             'ช': ['จ'],
             'บ': ['ป'],
             'ป': ['บ'],
+            'ร': ['ธ'],
+            'ธ': ['ร'],
             '0': ['O', 'o'],
             'O': ['0'],
             '1': ['I', 'l'],
@@ -337,7 +592,8 @@ class ValidationService:
                 for replacement in confusions[char]:
                     corrected = plate_number[:i] + replacement + plate_number[i+1:]
                     suggestions.append({
-                        "suggested_plate": corrected,
+                        "type": "plate_number",
+                        "suggested_value": corrected,
                         "confidence": 0.7,
                         "reason": f"Common OCR confusion: {char} → {replacement}"
                     })
