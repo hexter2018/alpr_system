@@ -138,16 +138,10 @@ const DashboardPage: React.FC = () => {
 
       let response;
       if (exportConfig.format === 'excel') {
-        response = await api.get('/export/excel', {
-          params,
-          responseType: 'blob',
-        });
+        response = await api.export.excel(params);
         downloadFile(response.data, 'alpr_report.xlsx');
       } else {
-        response = await api.get('/export/pdf', {
-          params,
-          responseType: 'blob',
-        });
+        response = await api.export.pdf(params);
         downloadFile(response.data, 'alpr_report.pdf');
       }
 

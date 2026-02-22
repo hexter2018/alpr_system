@@ -97,6 +97,20 @@ export const api = {
       apiClient.get(`/analytics/dashboard/top-provinces?limit=${limit}`),
   },
 
+  // Export
+  export: {
+    excel: (params?: any) =>
+      apiClient.get('/export/excel', {
+        params,
+        responseType: 'blob',
+      }),
+    pdf: (params?: any) =>
+      apiClient.get('/export/pdf', {
+        params,
+        responseType: 'blob',
+      }),
+  },
+
   // Auth
   auth: {
     login: (username: string, password: string) => {
