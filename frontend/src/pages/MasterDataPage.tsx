@@ -26,6 +26,7 @@ import {
   CheckCircleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { AxiosError } from 'axios';
 import { api } from '../services/api';
 
 const { TabPane } = Tabs;
@@ -77,8 +78,11 @@ const MasterDataPage: React.FC = () => {
       setProvinces(response.data);
       setFilteredProvinces(response.data);
     } catch (error) {
-      message.error('Failed to fetch provinces');
-      console.error(error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        message.error('Failed to fetch provinces');
+        console.error(error);
+      }
     } finally {
       setLoading(false);
     }
@@ -91,8 +95,11 @@ const MasterDataPage: React.FC = () => {
       setVehicles(response.data);
       setFilteredVehicles(response.data);
     } catch (error) {
-      message.error('Failed to fetch vehicles');
-      console.error(error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        message.error('Failed to fetch vehicles');
+        console.error(error);
+      }
     } finally {
       setLoading(false);
     }

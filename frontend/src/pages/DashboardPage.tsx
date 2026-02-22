@@ -32,6 +32,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Line, Bar } from 'recharts';
 import { api } from '../services/api';
 import dayjs from 'dayjs';
+import type { AxiosError } from 'axios';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -96,7 +97,10 @@ const DashboardPage: React.FC = () => {
       const response = await api.analytics.getDashboard();
       setStats(response.data);
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to fetch dashboard data:', error);
+      }
     }
   };
 
@@ -105,7 +109,10 @@ const DashboardPage: React.FC = () => {
       const response = await api.streaming.getActiveStreams();
       setCameras(response.data);
     } catch (error) {
-      console.error('Failed to fetch camera status:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to fetch camera status:', error);
+      }
     }
   };
 
@@ -120,7 +127,10 @@ const DashboardPage: React.FC = () => {
       }));
       setDailyTrend(chartData);
     } catch (error) {
-      console.error('Failed to fetch daily trend:', error);
+      const axiosError = error as AxiosError;
+      if (axiosError.code !== 'ERR_NETWORK_COOLDOWN') {
+        console.error('Failed to fetch daily trend:', error);
+      }
     }
   };
 
