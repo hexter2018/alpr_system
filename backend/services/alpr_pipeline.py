@@ -290,23 +290,21 @@ class ALPRPipeline:
         pattern1 = re.search(f"([{thai_chars}]{{2}})([0-9]{{1,4}})", text)
         if pattern1:
             plate_number = pattern1.group(1) + pattern1.group(2)
-            province_code = pattern1.group(1)
         
         # Pattern 2: Motorcycle format (digit + Thai chars + digits)
         pattern2 = re.search(f"([0-9])([{thai_chars}]{{2}})([0-9]{{1,4}})", text)
         if pattern2 and not plate_number:
             plate_number = pattern2.group(1) + pattern2.group(2) + pattern2.group(3)
-            province_code = pattern2.group(2)
         
         # Try to extract province name if present
         provinces_map = {
-            "กรุงเทพมหานคร": "กท",
-            "กรุงเทพ": "กท",
-            "เชียงใหม่": "นว",
-            "ขอนแก่น": "ขก",
-            "นครราชสีมา": "นม",
-            "สงขลา": "สงขลา",
-            # Add more as needed
+            "กรุงเทพมหานคร": "10",
+            "กรุงเทพ": "10",
+            "เชียงใหม่": "50",
+            "ขอนแก่น": "40",
+            "นครราชสีมา": "30",
+            "สงขลา": "90",
+            # Keep this small and rely on ValidationService fuzzy name matching as primary
         }
         
         for province_name, code in provinces_map.items():

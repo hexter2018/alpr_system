@@ -114,8 +114,11 @@ async def process_single_image(
         validation_result = validation_service.validate_plate(
             plate_number=ocr_result["plate_number"],
             province_code=ocr_result["province_code"],
+            province_text=ocr_result.get("full_text"),
             db=db
         )
+
+        resolved_province_code = validation_result.get("province_code")
         
         # Step 4: Save to Database
         plate_record = PlateRecord(
@@ -130,7 +133,7 @@ async def process_single_image(
             
             # Final data (same as OCR initially)
             final_plate_number=ocr_result["plate_number"],
-            final_province_code=ocr_result["province_code"],
+            final_province_code=resolved_province_code,
             province_id=validation_result.get("province_id"),
             
             # Validation
